@@ -49,7 +49,16 @@ body.home main{padding:0;min-height:0}
 .back{color:var(--mute)}
 .player{position:relative;margin:0 auto;background:#000;aspect-ratio:16/9;width:min(100%,calc(82vh*16/9))}
 .player.v{aspect-ratio:9/16;width:min(100%,calc(82vh*9/16))}
-.player iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.player iframe{position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none}
+.player:fullscreen{width:100vw;height:100vh;max-width:none;aspect-ratio:auto;margin:0}
+.player:-webkit-full-screen{width:100vw;height:100vh;max-width:none;aspect-ratio:auto;margin:0}
+.shield{position:absolute;inset:0;z-index:1;background:transparent;border:0;display:block;width:100%}
+.ctl{position:absolute;left:0;right:0;bottom:3px;z-index:2;display:flex;gap:22px;align-items:center;padding:36px 16px 14px;color:#fff;background:linear-gradient(to top,rgba(0,0,0,.6),rgba(0,0,0,0));pointer-events:none}
+.ctl button{pointer-events:auto;background:none;border:0;color:#fff;font:inherit;letter-spacing:-.01em;padding:4px 0}
+.ctl button:last-child{margin-left:auto}
+.bar{position:absolute;left:0;right:0;bottom:0;height:3px;z-index:3;background:rgba(255,255,255,.25);border:0;padding:0;display:block;width:100%}
+.bar::after{content:"";position:absolute;left:0;right:0;top:-12px;bottom:-4px}
+.bar i{display:block;height:100%;width:0;background:#fff}
 .pn{display:flex;justify-content:space-between;margin-top:20px;color:var(--mute)}
 .pn a:hover{color:var(--fg)}
 .about{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:28px}
@@ -137,13 +146,42 @@ function home(){
   }).join('');
   watch();
 }
+var pmsg=null;
 function project(s){
+  if(pmsg){window.removeEventListener("message",pmsg);pmsg=null}
   var i=PROJ.findIndex(function(x){return x.s===s}); if(i<0) return home();
   var p=PROJ[i],pr=PROJ[(i+PROJ.length-1)%PROJ.length],nx=PROJ[(i+1)%PROJ.length];
   app.innerHTML='<div class="label"><a class="back" href="#/">← Projets</a></div>'+
    '<section class="hero"><h1>'+esc(p.n)+'</h1><span class="back">'+p.d+'</span></section>'+
-   '<div class="player'+(p.o==="v"?' v':'')+'"><iframe src="https://player.vimeo.com/video/'+p.vm+'?'+(p.h?'h='+p.h+'&':'')+'autoplay=1&playsinline=1&loop=1&title=0&byline=0&portrait=0&dnt=1" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="'+esc(p.n)+'"></iframe></div>'+
+   '<div class="player'+(p.o==="v"?' v':'')+'" id="pl"><iframe id="vf" src="https://player.vimeo.com/video/'+p.vm+'?'+(p.h?'h='+p.h+'&':'')+'autoplay=1&playsinline=1&loop=1&controls=0&title=0&byline=0&portrait=0&dnt=1" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen tabindex="-1" title="'+esc(p.n)+'"></iframe>'+
+   '<button class="shield" id="sh" type="button" aria-label="Lecture / pause"></button>'+
+   '<div class="ctl"><button id="bp" type="button">Pause</button><button id="bs" type="button">Son activé</button><button id="bf" type="button">Plein écran</button></div>'+
+   '<button class="bar" id="bar" type="button" aria-label="Position dans la vidéo"><i id="fill"></i></button></div>'+
    '<div class="pn"><a href="#/projet/'+pr.s+'">← '+esc(pr.n)+'</a><a href="#/projet/'+nx.s+'">'+esc(nx.n)+' →</a></div>';
+  var $=function(x){return document.getElementById(x)},fr=$("vf"),pl=$("pl"),bp=$("bp"),bs=$("bs"),bf=$("bf"),sh=$("sh"),bar=$("bar"),fill=$("fill");
+  var playing=true,sound=true,dur=0;
+  function cmd(m,v){try{fr.contentWindow.postMessage(JSON.stringify(v===undefined?{method:m}:{method:m,value:v}),"*")}catch(e){}}
+  function ui(){bp.textContent=playing?"Pause":"Lecture";bs.textContent=sound?"Son activé":"Son coupé"}
+  function toggle(){playing=!playing;cmd(playing?"play":"pause");if(playing&&sound)cmd("setVolume",1);ui()}
+  sh.onclick=toggle; bp.onclick=toggle;
+  bs.onclick=function(){sound=!sound;cmd("setVolume",sound?1:0);ui()};
+  bf.onclick=function(){
+    if(document.fullscreenElement||document.webkitFullscreenElement){(document.exitFullscreen||document.webkitExitFullscreen).call(document)}
+    else{(pl.requestFullscreen||pl.webkitRequestFullscreen).call(pl)}
+  };
+  bar.onclick=function(e){if(!dur) return;var b=bar.getBoundingClientRect();cmd("setCurrentTime",dur*Math.min(1,Math.max(0,(e.clientX-b.left)/b.width)))};
+  function listen(){["play","pause","timeupdate"].forEach(function(n){cmd("addEventListener",n)})}
+  pmsg=function(e){
+    if(e.source!==fr.contentWindow) return;
+    var d=e.data; if(typeof d==="string"){try{d=JSON.parse(d)}catch(x){return}} if(!d) return;
+    if(d.event==="ready"){listen();cmd("setVolume",1)}
+    else if(d.event==="play"){playing=true;ui()}
+    else if(d.event==="pause"){playing=false;ui()}
+    else if(d.event==="timeupdate"&&d.data){dur=d.data.duration||dur;fill.style.width=(d.data.percent*100)+"%"}
+  };
+  window.addEventListener("message",pmsg);
+  fr.addEventListener("load",function(){listen();cmd("setVolume",1);setTimeout(function(){cmd("setVolume",1);cmd("play")},600)});
+  ui();
 }
 function about(){
   app.innerHTML='<section class="about"><h1><b>Nu studio</b> est une société de production basée à Paris.</h1>'+
@@ -182,6 +220,7 @@ route();
     c.classList.toggle("link",!!(e.target.closest&&e.target.closest("a,button")));
   });
   document.documentElement.addEventListener("mouseleave",function(){c.classList.remove("on")});
+  ["fullscreenchange","webkitfullscreenchange"].forEach(function(n){document.addEventListener(n,function(){(document.fullscreenElement||document.webkitFullscreenElement||document.body).appendChild(c)})});
 })();
 
 // Animation de lancement : vignettes vidéo qui apparaissent une à une, puis texte en fondu progressif
