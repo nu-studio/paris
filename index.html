@@ -100,7 +100,8 @@ html.intro header,html.intro main,html.intro footer{opacity:0}
 .slide iframe.in{opacity:1}
 .slide.v{background-size:contain}
 .slide.bars iframe{width:calc(max(100vw,177.78vh)*1.186);height:calc(max(56.25vw,100vh)*1.186)}
-.slide iframe{background:#000}
+/* Le lecteur Vimeo est en thème clair : sans ceci, le navigateur peint un fond blanc opaque derrière lui sur notre page sombre */
+iframe{color-scheme:normal;background:transparent}
 .slide.v iframe{width:56.25vh;height:100%}
 @media (max-aspect-ratio:1/1){.slide.v{background-size:cover}.slide.v iframe{width:max(100vw,56.25vh);height:max(177.78vw,100vh)}}
 .slide::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.6),rgba(0,0,0,0) 45%);pointer-events:none}
