@@ -52,7 +52,11 @@ body.home main{padding:0;min-height:0}
 .player{background-position:center;background-size:cover;background-repeat:no-repeat}
 .player iframe{position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none;opacity:0;transition:opacity .3s}
 .player iframe.in{opacity:1}
-.player.pfs,.player.v.pfs{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;max-width:none;aspect-ratio:auto;margin:0;z-index:100000}
+.player.pfs,.player.v.pfs{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;max-width:none;aspect-ratio:auto;margin:0;z-index:100000;background-color:#000;background-size:contain}
+@media (orientation:portrait){
+  .player.pfs:not(.v){inset:auto;left:50%;top:50%;width:100vh;width:100dvh;height:100vw;transform:translate(-50%,-50%) rotate(90deg)}
+}
+.player.pfs .ctl{padding-bottom:max(14px,env(safe-area-inset-bottom))}
 body.pfs-lock{overflow:hidden}
 .player:fullscreen{width:100vw;height:100vh;max-width:none;aspect-ratio:auto;margin:0}
 .player:-webkit-full-screen{width:100vw;height:100vh;max-width:none;aspect-ratio:auto;margin:0}
@@ -260,7 +264,7 @@ function project(s){
    '<div class="pn"><a href="#/projet/'+pr.s+'">← '+esc(pr.n)+'</a><a href="#/projet/'+nx.s+'">'+esc(nx.n)+' →</a></div>';
   var $=function(x){return document.getElementById(x)},fr=$("vf"),pl=$("pl"),bp=$("bp"),bs=$("bs"),bf=$("bf"),sh=$("sh"),tl=$("tl"),fill=$("fill"),knob=$("knob"),tip=$("tip"),tm=$("tm");
   var m0=/^(\d+):(\d+)/.exec(p.d||"");
-  var playing=true,sound=true,dur=m0?(+m0[1])*60+(+m0[2]):0,cur=0,drag=false,lastSeek=0,idleT=null;
+  var askedAt=0,triedMuted=false,userPaused=false,playing=true,sound=true,dur=m0?(+m0[1])*60+(+m0[2]):0,cur=0,drag=false,lastSeek=0,idleT=null;
   function cmd(m,v){try{fr.contentWindow.postMessage(JSON.stringify(v===undefined?{method:m}:{method:m,value:v}),"*")}catch(e){}}
   function fmt(x){x=Math.max(0,x||0);return ("0"+Math.floor(x/60)).slice(-2)+":"+("0"+Math.floor(x%60)).slice(-2)}
   function fmtT(x){x=Math.max(0,x||0);return Math.floor(x/60)+":"+("0"+(x%60).toFixed(1)).slice(-4)}
@@ -271,23 +275,35 @@ function project(s){
     bp.textContent=playing?"pause":"lecture";bs.textContent=sound?"mute":"son activé";
     if(playing) wake(); else {pl.classList.remove("idle");clearTimeout(idleT)}
   }
-  function toggle(){playing=!playing;cmd(playing?"play":"pause");if(playing&&sound)cmd("setVolume",1);ui()}
+  function toggle(){playing=!playing;userPaused=!playing;if(playing&&sound){cmd("setMuted",false);cmd("setVolume",1)}cmd(playing?"play":"pause");ui()}
+  function fallbackMuted(){if(triedMuted||userPaused||!askedAt) return;triedMuted=true;sound=false;playing=true;cmd("setMuted",true);cmd("setVolume",0);cmd("play");ui()}
+  function soundOn(){sound=true;userPaused=false;cmd("setMuted",false);cmd("setVolume",1);playing=true;cmd("play");ui()}
+  function soundOff(){sound=false;cmd("setMuted",true);cmd("setVolume",0);ui()}
+  function syncSound(){cmd("getMuted");cmd("getVolume");cmd("getPaused")}
   sh.addEventListener("mousedown",function(e){e.preventDefault()});
-  sh.onclick=toggle; bp.onclick=toggle;
+  // un toucher sur la vidéo muette active le son ; sinon il met en pause / relance
+  sh.onclick=function(){if(!sound) soundOn(); else toggle()}; bp.onclick=toggle;
   sh.addEventListener("keydown",function(e){if(e.key===" "||e.key==="Enter"){e.preventDefault();toggle()}});
-  bs.onclick=function(){sound=!sound;cmd("setVolume",sound?1:0);ui()};
+  bs.onclick=function(){if(sound) soundOff(); else soundOn()};
   bf.onclick=function(){
     if(pl.classList.contains("pfs")){exitP();return}
     if(document.fullscreenElement||document.webkitFullscreenElement){(document.exitFullscreen||document.webkitExitFullscreen).call(document);return}
     var fn=pl.requestFullscreen||pl.webkitRequestFullscreen;
-    if(!fn){enterP();return}
-    try{var rq=fn.call(pl); if(rq&&rq.catch) rq.catch(enterP)}catch(e){enterP()}
+    var can=!!fn&&(document.fullscreenEnabled||document.webkitFullscreenEnabled);
+    if(!can){enterP();return}
+    try{var rq=fn.call(pl); if(rq&&rq.catch) rq.catch(function(){enterP()})}catch(e){enterP();return}
+    setTimeout(function(){
+      if(document.fullscreenElement||document.webkitFullscreenElement){
+        if(p.o!=="v"&&screen.orientation&&screen.orientation.lock){screen.orientation.lock("landscape").catch(function(){})}
+      }else if(!pl.classList.contains("pfs")) enterP();
+    },400);
   };
   // iPhone : pas d’API plein écran pour une page web → plein écran « simulé » qui remplit l’écran
   function enterP(){pl.classList.add("pfs");document.body.classList.add("pfs-lock");bf.textContent="quitter";wake()}
   function exitP(){pl.classList.remove("pfs");document.body.classList.remove("pfs-lock");bf.textContent="plein écran"}
+  function rotated(){return pl.classList.contains("pfs")&&!pl.classList.contains("v")&&matchMedia("(orientation:portrait)").matches}
   // Barre de temps : clic ou glisser pour choisir le moment (précision au dixième de seconde)
-  function ratio(e){var b=tl.getBoundingClientRect();return Math.min(1,Math.max(0,(e.clientX-b.left)/b.width))}
+  function ratio(e){var b=tl.getBoundingClientRect(),v=rotated()?(e.clientY-b.top)/b.height:(e.clientX-b.left)/b.width;return Math.min(1,Math.max(0,v))}
   function seek(e,force){
     if(!dur) return; var x=Math.round(ratio(e)*dur*10)/10; paint(x);
     var n=Date.now(); if(force||n-lastSeek>70){lastSeek=n;cmd("setCurrentTime",x)}
@@ -296,18 +312,28 @@ function project(s){
   tl.addEventListener("pointermove",function(e){if(!dur) return;var r=ratio(e);tip.textContent=fmtT(r*dur);tip.style.left=(r*100)+"%";if(drag) seek(e)});
   tl.addEventListener("pointerup",function(e){if(drag) seek(e,true);drag=false;tl.classList.remove("drag")});
   tl.addEventListener("pointercancel",function(){drag=false;tl.classList.remove("drag")});
-  function listen(){["play","pause","timeupdate"].forEach(function(n){cmd("addEventListener",n)});cmd("getDuration")}
+  function listen(){["play","pause","timeupdate","volumechange"].forEach(function(n){cmd("addEventListener",n)});cmd("getDuration")}
   pmsg=function(e){
     if(e.source!==fr.contentWindow) return;
     var d=e.data; if(typeof d==="string"){try{d=JSON.parse(d)}catch(x){return}} if(!d) return;
-    if(d.event==="ready"){listen();cmd("setVolume",1)}
+    if(d.event==="ready"){listen();syncSound()}
+    else if(d.method==="getMuted"){if(d.value){sound=false;ui()}}
+    else if(d.method==="getVolume"){if(d.value===0){sound=false;ui()}}
+    else if(d.method==="getPaused"){
+      // lecture avec le son refusée par le navigateur → on relance en muet, et le bouton l’indique
+      if(d.value&&Date.now()-askedAt>400) fallbackMuted();
+    }
+    else if(d.event==="volumechange"&&d.data){sound=d.data.volume>0&&!d.data.muted;ui()}
     else if(d.method==="getDuration"&&d.value){dur=d.value;paint(cur)}
     else if(d.event==="play"){playing=true;ui()}
-    else if(d.event==="pause"){playing=false;ui()}
+    else if(d.event==="pause"){playing=false;if(!userPaused&&!triedMuted&&askedAt&&Date.now()-askedAt<4000) fallbackMuted(); else ui()}
     else if(d.event==="timeupdate"&&d.data){dur=d.data.duration||dur;if(!drag) paint(d.data.seconds)}
   };
   window.addEventListener("message",pmsg);
-  fr.addEventListener("load",function(){arm(fr);listen();cmd("setVolume",1);setTimeout(function(){cmd("setVolume",1);cmd("play")},600)});
+  fr.addEventListener("load",function(){
+    arm(fr);listen();cmd("setMuted",false);cmd("setVolume",1);cmd("play");askedAt=Date.now();
+    [500,1200,2200].forEach(function(ms){setTimeout(syncSound,ms)});
+  });
   paint(0); ui();
 }
 
